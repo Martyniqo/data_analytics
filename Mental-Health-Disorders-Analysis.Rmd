@@ -1,0 +1,227 @@
+---
+title: "Mental Health Disorders Analysis"
+author: "Martyna Rachanczyk"
+date: "June 17, 2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+**Source of the data** [**https://data.world/vizzup/mental-health-depression-disorder-data**](https://data.world/vizzup/mental-health-depression-disorder-data){.uri}
+
+```{r message= FALSE,warning= FALSE}
+## importing libraries
+
+library(readxl)
+library(plotly)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(ggmap)
+library(maps)
+library(corrplot)
+library(lmtest)
+library(car)
+```
+
+```{r}
+## Importing the mental health data set
+
+mental_health <- read_excel("C:/Users/Marti/OneDrive/Desktop/R_Project_2023/mental_health_data.xlsx")
+head(mental_health)
+```
+
+```{r}
+str(mental_health)
+#summary(mental_health)
+```
+
+There are 10 columns in the data set.
+
+```{r}
+colnames(mental_health)
+```
+
+```{r}
+# Prevalence distribution for each mental disorder
+
+mental_health %>%
+  gather(key = "Disorder", value = "Prevalence", -Entity, -Year) %>%
+  mutate(Prevalence = as.numeric(Prevalence)) %>%
+  ggplot(aes(x = Prevalence)) +
+  geom_histogram(binwidth = 0.5) +
+  facet_wrap(~Disorder, scales = "free_x") +
+  xlab("Prevalence (%)") +
+  ylab("Count") +
+  theme_minimal()
+
+```
+
+## Data Cleaning
+
+```{r}
+mean(rowSums(is.na(mental_health)) > 0) * 100
+```
+
+```{r}
+mental_health %>%
+    gather(Disorder, Prevalence, -Entity, -Year) %>%
+    mutate(Missing = is.na(Prevalence)) %>%
+    group_by(Disorder, Missing) %>%
+    summarise(Count = n()) %>%
+    ggplot(aes(x=Disorder, y=Count, fill=Missing)) +
+    geom_bar(stat='identity') +
+    ylab("Count") +
+    theme_minimal()
+```
+
+There are approximately 15% of rows with missing data - will be removed.
+
+```{r}
+mental_health_clean <- mental_health[complete.cases(mental_health), ]
+
+```
+
+```{r}
+# Tables with descriptive statistics for each disorder
+
+mental_health %>%
+    summarise_at(vars(-Entity, -Year), funs(mean(., na.rm = TRUE), sd(., na.rm = TRUE), sum(is.na(.))))
+```
+
+## Correlation Analysis
+
+```{r}
+correlation_matrix <- cor(mental_health[, c("Schizophrenia (%)", "Bipolar disorder (%)", "Eating disorders (%)","Anxiety disorders (%)", "Drug use disorders (%)", "Depression (%)","Alcohol use disorders (%)")], use = "complete.obs")
+```
+
+```{r}
+# Select only numeric columns
+numeric_data <- mental_health %>% 
+    select(where(is.numeric))
+
+# Compute correlation matrix
+correlation_matrix <- cor(numeric_data, use = "pairwise.complete.obs")
+
+# Plot correlation matrix
+corrplot(correlation_matrix, method = "circle")
+```
+
+```{r}
+plot <- plot_ly(
+  z = correlation_matrix,
+  x = colnames(correlation_matrix),
+  y = colnames(correlation_matrix),
+  type = "heatmap",
+  colorscale = "RdYlBu"
+)
+
+plot <- plot %>% 
+  layout(
+    title = "Correlation of mental disorders",
+    xaxis = list(title = ""),
+    yaxis = list(title = "")
+  )
+
+plot
+```
+
+```{r}
+# Regression model to investigate how the prevalence of one disorder is associated with another
+
+model <- lm(`Depression (%)` ~ `Anxiety disorders (%)`, data = mental_health_clean)
+summary(model)
+
+```
+
+```{r}
+# Relationship between Depression and Anxiety Disorders
+
+ggplot(mental_health_clean, aes(x=`Anxiety disorders (%)`, y=`Depression (%)`)) +
+    geom_point(color = "deepskyblue") +
+    geom_smooth(method="lm", col="darkviolet") +
+    xlab("Anxiety Disorders (%)") +
+    ylab("Depression (%)") +
+    theme_minimal() +
+    labs(title = "Relationship between Depression and Anxiety Disorders")
+
+
+```
+
+```{r}
+# Relationship between Bipolar and Eating disorders
+
+ggplot(mental_health_clean, aes(x=`Bipolar disorder (%)`, y=`Eating disorders (%)`)) +
+    geom_point(color = "deepskyblue") +
+    geom_smooth(method="lm", col="darkviolet") +
+    xlab("Bipolar disorder (%)") +
+    ylab("Eating disorders (%)") +
+    theme_minimal() +
+    labs(title = "Relationship between Bipolar and Eating disorders")
+
+
+```
+
+## Development of depression over the years
+
+```{r}
+depression_by_year <- aggregate(mental_health_clean$`Depression (%)`, by = list(Year = mental_health_clean$Year), FUN = function(x) c(mean = mean(x), median = median(x)))
+```
+
+```{r}
+
+plot <- plot_ly(x = depression_by_year$Year, y = depression_by_year$x[,"mean"], type = "scatter", mode = "lines", name = 'Mean') %>%
+  add_trace(y = depression_by_year$x[,"median"], name = 'Median') %>% 
+  layout(title = "Development of depresion over the years",
+         xaxis = list(title = "Year"),
+         yaxis = list(title = "Depression level in %"))
+
+plot
+```
+
+## Alcohol Use Disorder by Country in 2017
+
+```{r}
+alcohol_disorder_2017 = subset(mental_health_clean, Year == 2017)
+```
+
+```{r}
+# Alcohol Use Disorder by Country in 2017
+
+plot_alcohol <- plot_ly(
+    data = alcohol_disorder_2017,
+    type = 'choropleth',
+    locations = alcohol_disorder_2017$Code,
+    z = alcohol_disorder_2017$`Alcohol use disorders (%)`,
+    text = alcohol_disorder_2017$Entity,
+    colorscale = "RdPu") %>% 
+    layout(title = "Alcohol Use Disorder by Country in 2017")
+```
+```{r}
+plot_alcohol
+```
+## Depression by Country in 2017
+
+```{r}
+depression_2017 = subset(mental_health_clean, Year == 2017)
+```
+
+```{r}
+# Depression by Country in 2017
+
+plot_depression <- plot_ly(
+    data = depression_2017,
+    type = 'choropleth',
+    locations = depression_2017$Code,
+    z = depression_2017$`Depression (%)`,
+    text = depression_2017$Entity,
+    colorscale = "RdPu") %>% 
+    layout(title = "Depression by Country in 2017")
+```
+```{r}
+plot_depression
+```
